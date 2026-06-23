@@ -1,27 +1,86 @@
 # Python
 __pycache__/
 *.py[cod]
+*$py.class
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
 
 # Virtual environments
 .venv/
 venv/
 env/
+ENV/
 
-# ROS2/colcon generated outputs
+# Python packaging / build outputs
 build/
+dist/
+
+# ROS2 / colcon generated outputs
 install/
 log/
+.logs/
 main_ws/build/
 main_ws/install/
 main_ws/log/
 
+# Node/frontend dependencies and generated output
+node_modules/
+.vite/
+*.tsbuildinfo
+
 # Runtime/local artifacts
+.hermes/
+.cache/
 *.log
-*.sqlite3
+*.pid
+*.tmp
+*.swp
+logs/
+run/
 runtime/
+
+# Local environment / secrets
+.env
+.env.*
+!.env.example
+*.local
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+credentials.json
+credentials*.json
+*credentials*.json
+secrets*.json
+*secret*.json
+*token*.json
+
+# Local databases and runtime snapshots
+*.sqlite
+*.sqlite3
+*.db
+*.db3
+
+# Large robotics/runtime recordings
+*.bag
+*.bag.active
+*.mcap
+*.pcd
+*.ply
+*.npy
+*.npz
+*.mp4
+*.avi
+*.mov
 
 # Data/model artifacts kept out of GitHub
 /datasets/floor_images/
@@ -34,7 +93,29 @@ runtime/
 /yolo_v5/**/*.engine
 /yolo_v5/**/*.tflite
 
-# Secrets/local config
-.env
-.env.*
-!.env.example
+# Re-downloadable archives/installers
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.rar
+*.exe
+*.msi
+*.dmg
+*.pkg
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Repository-local agent/workspace state
+.agents/
+.codex/
+
+# Local backups: keep only the directory policy files if present
+backups/*
+!backups/.gitignore
+!backups/README.md
