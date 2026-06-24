@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# ROS2/colcon generated outputs
+build/
+install/
+log/
+main_ws/build/
+main_ws/install/
+main_ws/log/
+
+# Runtime/local artifacts
+*.log
+*.sqlite3
+runtime/
+
+# Secrets/local config
+.env
+.env.*
+!.env.example

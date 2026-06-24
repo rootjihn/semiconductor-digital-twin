@@ -1,0 +1,11 @@
+# Low-level Modbus coil pulse.
+# 개발/디버깅용에 가깝다.
+
+uint16 address
+uint16 command_seq
+uint16 pulse_ms
+---
+bool ok
+uint16 last_ack_seq
+uint16 error_code
+string message

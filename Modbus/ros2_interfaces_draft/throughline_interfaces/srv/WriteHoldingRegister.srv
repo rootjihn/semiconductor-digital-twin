@@ -1,0 +1,11 @@
+# Low-level Modbus holding register write.
+# 주소 whitelist를 bridge 내부에 둘 것을 권장한다.
+
+uint16 address
+uint16 value
+uint16 command_seq
+---
+bool ok
+uint16 last_ack_seq
+uint16 error_code
+string message

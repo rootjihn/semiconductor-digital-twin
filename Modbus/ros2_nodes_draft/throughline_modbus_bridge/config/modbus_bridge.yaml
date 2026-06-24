@@ -1,0 +1,17 @@
+modbus_bridge_node:
+  ros__parameters:
+    host: "127.0.0.1"
+    port: 15020
+    unit_id: 1
+    poll_hz: 5.0
+    heartbeat_timeout_sec: 2.0
+    reconnect_sec: 1.0
+    default_pulse_ms: 100
+    allow_low_level_write: false
+    allowed_write_registers:
+      - 106   # HR_HEARTBEAT_PC
+      - 130   # HR_CONVEYOR_SPEED_SET
+      - 140   # HR_MANUAL_COMMAND_CODE
+      - 141   # HR_MANUAL_COMMAND_ARG0
+      - 142   # HR_MANUAL_COMMAND_ARG1
+      - 150   # HR_OPERATION_MODE
