@@ -80,6 +80,11 @@ def generate_launch_description():
             description='Move target z = sampled TCP plane z + this hover offset.',
         ),
         DeclareLaunchArgument(
+            'min_z_m',
+            default_value='0.02',
+            description='Minimum allowed test target Z in base frame meters.',
+        ),
+        DeclareLaunchArgument(
             'target_r_deg',
             default_value='0.0',
             description='Fallback Dobot tool rotation if current TCP r is unavailable.',
@@ -145,6 +150,7 @@ def generate_launch_description():
                 'hsv_lower_red2': LaunchConfiguration('hsv_lower_red2'),
                 'hsv_upper_red2': LaunchConfiguration('hsv_upper_red2'),
                 'z_hover_offset_m': LaunchConfiguration('z_hover_offset_m'),
+                'min_z_m': LaunchConfiguration('min_z_m'),
                 'target_r_deg': LaunchConfiguration('target_r_deg'),
                 'velocity_ratio': LaunchConfiguration('velocity_ratio'),
                 'acceleration_ratio': LaunchConfiguration('acceleration_ratio'),

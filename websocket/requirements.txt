@@ -1,0 +1,2 @@
+# MVP 01~04는 Python 표준 라이브러리만 사용한다.
+# 운영 단계에서 FastAPI/uvicorn/websockets로 교체할 수 있지만, 현재는 설치 없이 실행 가능하게 둔다.

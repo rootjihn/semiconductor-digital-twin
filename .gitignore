@@ -23,6 +23,17 @@ main_ws/log/
 *.sqlite3
 runtime/
 
+# Data/model artifacts kept out of GitHub
+/datasets/floor_images/
+/yolo_v5/**/weights/
+/yolo_v5/**/train/
+/yolo_v5/**/test/
+/yolo_v5/**/validation/
+/yolo_v5/**/*.pt
+/yolo_v5/**/*.onnx
+/yolo_v5/**/*.engine
+/yolo_v5/**/*.tflite
+
 # Secrets/local config
 .env
 .env.*

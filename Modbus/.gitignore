@@ -1,0 +1,16 @@
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local environments and runtime files
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+*.log
+*.sqlite3
+runtime/

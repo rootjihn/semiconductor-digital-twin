@@ -13,7 +13,7 @@ from typing import Any, Callable
 import cv2
 import numpy as np
 import rclpy
-from rclpy.action import ActionClient
+from rclpy.action import ActionClient, get_action_names_and_types
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
@@ -113,6 +113,8 @@ class PerspectiveDisplayTransform:
 
 
 DisplayTransformLike = DisplayTransform | PerspectiveDisplayTransform
+# Avoid the Dobot base singular/near-origin area; values are meters.
+DEFAULT_RETURN_HOME_POSE_M = (0.16, 0.01, 0.06)
 
 
 def _perspective_point(matrix: np.ndarray, x: float, y: float) -> tuple[float, float]:
@@ -160,6 +162,7 @@ class ClickMarker:
     image_xy: tuple[float, float]
     kind: str
     mode: str
+    label: str | None = None
 
 
 @dataclass(frozen=True)
@@ -181,6 +184,7 @@ class ClickPickPlacePlan:
     display_xy: tuple[float, float]
     image_xy: tuple[float, float]
     base_xy: tuple[float, float]
+    descend_z_m: float
     steps: list[PickPlaceStep]
 
 
@@ -222,9 +226,7 @@ def normalize_descend_distance_m(value: float) -> float:
 
     Operators sometimes type a signed Z offset such as ``-0.01`` to mean
     "go down 1 cm". The parameter is a distance, not an offset, so use the
-    magnitude and compute ``descend_z_m = hover_z_m - abs(descend_distance_m)``.
-    The resulting target Z may be negative; unreachable targets are left to
-    the Dobot action server/trajectory validator instead of being pre-clamped.
+    magnitude before computing the final descend target.
     """
     distance = float(value)
     if not math.isfinite(distance):
@@ -232,18 +234,53 @@ def normalize_descend_distance_m(value: float) -> float:
     return abs(distance)
 
 
-def compute_descend_z_m(hover_z_m: float, descend_distance_m: float) -> float:
-    """Compute final descend target Z, accepting signed operator input and negative Z."""
+def compute_descend_z_m(
+    hover_z_m: float,
+    descend_distance_m: float,
+    *,
+    min_z_m: float = 0.02,
+) -> float:
+    """Compute a descend target Z without going below the configured safety floor."""
     hover_z = float(hover_z_m)
     if not math.isfinite(hover_z):
         raise ValueError("hover_z_m must be finite")
+    min_z = float(min_z_m)
+    if not math.isfinite(min_z):
+        raise ValueError("min_z_m must be finite")
     descend_distance = normalize_descend_distance_m(descend_distance_m)
-    return hover_z - descend_distance
+    return max(min_z, hover_z - descend_distance)
 
 
-def make_click_marker(mode: str, image_xy: tuple[float, float]) -> ClickMarker:
+def effective_descend_distance_m(
+    hover_z_m: float,
+    descend_distance_m: float,
+    *,
+    min_z_m: float = 0.02,
+) -> float:
+    """Return the actual downward distance after applying the Z safety floor."""
+    hover_z = float(hover_z_m)
+    descend_z = compute_descend_z_m(
+        hover_z,
+        descend_distance_m,
+        min_z_m=min_z_m,
+    )
+    return max(0.0, hover_z - descend_z)
+
+
+def z_marker_label(z_m: float | None) -> str:
+    """Format expected descend Z for compact marker text."""
+    if z_m is None or not math.isfinite(float(z_m)):
+        return "z=?"
+    return f"z={float(z_m) * 1000.0:.0f}mm"
+
+
+def make_click_marker(
+    mode: str,
+    image_xy: tuple[float, float],
+    label: str | None = None,
+) -> ClickMarker:
     """Build a marker using original image coordinates."""
-    return ClickMarker(image_xy=image_xy, kind=marker_kind_for_mode(mode), mode=mode)
+    return ClickMarker(image_xy=image_xy, kind=marker_kind_for_mode(mode), mode=mode, label=label)
 
 
 def build_display_transform(
@@ -313,21 +350,50 @@ def build_click_pick_place_plan(
     transform: DisplayTransformLike,
     calibration: PixelToBaseCalibration,
     hover_z_m: float,
-    descend_distance_m: float,
+    descend_distance_m: float | None,
     r_deg: float,
     return_to_hover: bool,
     movej_motion_type: int,
     movel_motion_type: int,
+    descend_z_m_override: float | None = None,
+    min_z_m: float = 0.02,
+    target_z_m: float | None = None,
+    return_home_pose_m: tuple[float, float, float] | None = None,
 ) -> ClickPickPlacePlan:
-    """Build the MoveJ -> MoveL -> suction -> optional-return sequence for a click."""
+    """Build the MoveJ -> MoveL -> suction -> optional-return/home sequence for a click."""
     _validate_mode(mode)
-    if not all(math.isfinite(float(v)) for v in [hover_z_m, descend_distance_m, r_deg]):
-        raise ValueError("hover_z_m, descend_distance_m, and r_deg must be finite")
+    finite_values = [hover_z_m, r_deg, min_z_m]
+    if descend_distance_m is not None:
+        finite_values.append(descend_distance_m)
+    if target_z_m is not None:
+        finite_values.append(target_z_m)
+    if not all(math.isfinite(float(v)) for v in finite_values):
+        raise ValueError(
+            "hover_z_m, target_z_m/descend_distance_m, r_deg, "
+            "and min_z_m must be finite"
+        )
 
+    min_z = float(min_z_m)
     image_xy = transform.display_to_image(*display_xy)
     base_x_m, base_y_m = apply_pixel_to_base_xy(calibration, image_xy)
-    effective_descend_distance_m = normalize_descend_distance_m(descend_distance_m)
-    descend_z_m = compute_descend_z_m(hover_z_m, effective_descend_distance_m)
+    uses_absolute_target_z = target_z_m is not None
+    configured_descend_z_m = (
+        float(target_z_m)
+        if uses_absolute_target_z
+        else compute_descend_z_m(
+            hover_z_m,
+            0.0 if descend_distance_m is None else descend_distance_m,
+            min_z_m=min_z,
+        )
+    )
+    raw_descend_z_m = (
+        configured_descend_z_m
+        if descend_z_m_override is None
+        else float(descend_z_m_override)
+    )
+    if not math.isfinite(raw_descend_z_m):
+        raise ValueError("descend_z_m_override must be finite")
+    descend_z_m = raw_descend_z_m if uses_absolute_target_z else max(min_z, raw_descend_z_m)
     hover_pose = pose_xy_to_action_target(
         x_m=base_x_m,
         y_m=base_y_m,
@@ -340,6 +406,18 @@ def build_click_pick_place_plan(
         z_m=descend_z_m,
         yaw_deg=r_deg,
     )
+    home_pose = None
+    if return_home_pose_m is not None:
+        if len(return_home_pose_m) != 3:
+            raise ValueError("return_home_pose_m must contain x, y, z")
+        if not all(math.isfinite(float(v)) for v in return_home_pose_m):
+            raise ValueError("return_home_pose_m values must be finite")
+        home_pose = pose_xy_to_action_target(
+            x_m=float(return_home_pose_m[0]),
+            y_m=float(return_home_pose_m[1]),
+            z_m=float(return_home_pose_m[2]),
+            yaw_deg=r_deg,
+        )
     suction_enabled = mode == "attach"
     suction_label = "suction ON" if suction_enabled else "suction OFF"
 
@@ -371,12 +449,22 @@ def build_click_pick_place_plan(
                 target_pose=hover_pose,
             )
         )
+    if home_pose is not None:
+        steps.append(
+            PickPlaceStep(
+                kind="move",
+                label="MoveJ return home",
+                motion_type=int(movej_motion_type),
+                target_pose=home_pose,
+            )
+        )
 
     return ClickPickPlacePlan(
         mode=mode,
         display_xy=(float(display_xy[0]), float(display_xy[1])),
         image_xy=(float(image_xy[0]), float(image_xy[1])),
         base_xy=(float(base_x_m), float(base_y_m)),
+        descend_z_m=float(descend_z_m),
         steps=steps,
     )
 
@@ -453,7 +541,14 @@ class ClickPickPlaceNode(Node):
         self.declare_parameter("display_h", 0)
         self.declare_parameter("crop_save_path", "~/image_crop_viewer_crop.json")
         self.declare_parameter("auto_load_crop", True)
+        self.declare_parameter("hover_z_a", 0.08)
+        self.declare_parameter("target_z_a", -0.07)
+        self.declare_parameter("hover_z_d", 0.08)
+        self.declare_parameter("target_z_d", -0.07)
+        # Legacy parameters kept for old launch commands/tests; A/D clicks use the
+        # mode-specific values above.
         self.declare_parameter("hover_z_m", 0.06)
+        self.declare_parameter("min_z_m", 0.02)
         self.declare_parameter("descend_distance_m", 0.04)
         self.declare_parameter("r_deg", 0.0)
         self.declare_parameter("return_to_hover", True)
@@ -495,7 +590,6 @@ class ClickPickPlaceNode(Node):
             self._tcp_pose_callback,
             10,
         )
-
         self._action_client = None
         if PointToPoint is not None:
             self._action_client = ActionClient(
@@ -558,8 +652,8 @@ class ClickPickPlaceNode(Node):
 
     def _available_action_names(self) -> list[str]:
         try:
-            return sorted(name for name, _types in self.get_action_names_and_types())
-        except RuntimeError:
+            return sorted(name for name, _types in get_action_names_and_types(self))
+        except (AttributeError, RuntimeError):
             return []
 
     def _available_service_names(self) -> list[str]:
@@ -576,17 +670,19 @@ class ClickPickPlaceNode(Node):
             "ros2 launch dobot_bringup dobot_magician_control_system.launch.py"
         )
 
+    def _z_profile_for_mode(self, mode: str) -> tuple[float, float]:
+        """Return (hover_z_m, target_z_m) for an attach/detach key mode."""
+        _validate_mode(mode)
+        suffix = "a" if mode == "attach" else "d"
+        hover_z = float(self.get_parameter(f"hover_z_{suffix}").value)
+        target_z = float(self.get_parameter(f"target_z_{suffix}").value)
+        if not all(math.isfinite(value) for value in [hover_z, target_z]):
+            raise ValueError(f"hover_z_{suffix} and target_z_{suffix} must be finite")
+        return hover_z, target_z
+
     def _print_startup_message(self) -> None:
-        hover_z = float(self.get_parameter("hover_z_m").value)
-        raw_descend_distance = float(self.get_parameter("descend_distance_m").value)
-        descend_distance = normalize_descend_distance_m(raw_descend_distance)
-        descend_z = compute_descend_z_m(hover_z, raw_descend_distance)
-        if raw_descend_distance < 0.0:
-            self.get_logger().warn(
-                "[param] descend_distance_m=%.4f was negative; "
-                "using abs() as %.4f m downward"
-                % (raw_descend_distance, descend_distance)
-            )
+        hover_z_a, target_z_a = self._z_profile_for_mode("attach")
+        hover_z_d, target_z_d = self._z_profile_for_mode("detach")
         print("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", flush=True)
         print("▶ click pick/place", flush=True)
         print(f"  image: {self.get_parameter('image_topic').value}", flush=True)
@@ -598,17 +694,15 @@ class ClickPickPlaceNode(Node):
         )
         print(f"  dry_run: {self.get_parameter('dry_run').value}", flush=True)
         print(
-            "  z: hover_z_m=%.3f, descend_distance_m=%.3f, "
-            "effective_descend_m=%.3f, descend_z_m=%.3f"
-            % (hover_z, raw_descend_distance, descend_distance, descend_z),
+            "  z(A): hover_z_a=%.3f target_z_a=%.3f | "
+            "z(D): hover_z_d=%.3f target_z_d=%.3f"
+            % (hover_z_a, target_z_a, hover_z_d, target_z_d),
             flush=True,
         )
-        if descend_z < 0.0:
-            self.get_logger().warn(
-                "[param] descend_z_m=%.4f is below 0; sending as requested. "
-                "Dobot validation may still reject unreachable targets."
-                % descend_z
-            )
+        print(
+            "  return_home(D only): x=%.3f y=%.3f z=%.3f" % DEFAULT_RETURN_HOME_POSE_M,
+            flush=True,
+        )
         print("  키: x=크롭 선택/재선택, r=크롭 해제, a=흡착(+), d=탈착(x), q/ESC=종료", flush=True)
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", flush=True)
 
@@ -629,6 +723,38 @@ class ClickPickPlaceNode(Node):
             if self._latest_frame is None:
                 return None
             return self._latest_frame.copy()
+
+    def _configured_descend_z_m(self, mode: str) -> float:
+        _hover_z, target_z = self._z_profile_for_mode(mode)
+        return target_z
+
+    def _resolve_descend_z_for_click(
+        self,
+        *,
+        mode: str,
+        image_xy: tuple[float, float],
+        color_shape: tuple[int, ...],
+    ) -> tuple[float, str, list[str]]:
+        del image_xy, color_shape
+        configured_z = self._configured_descend_z_m(mode)
+        return configured_z, z_marker_label(configured_z), []
+
+    def _marker_label_for_click(
+        self,
+        *,
+        mode: str,
+        image_xy: tuple[float, float],
+        color_shape: tuple[int, ...],
+    ) -> str:
+        try:
+            _z, label, _logs = self._resolve_descend_z_for_click(
+                mode=mode,
+                image_xy=image_xy,
+                color_shape=color_shape,
+            )
+            return label
+        except ValueError:
+            return "z=?"
 
     def _build_transform_for_frame(self, frame: np.ndarray) -> DisplayTransformLike:
         if self._crop_setting is not None:
@@ -707,17 +833,40 @@ class ClickPickPlaceNode(Node):
                     markerSize=24,
                     thickness=2,
                 )
+            if marker.label:
+                cv2.putText(
+                    display,
+                    marker.label,
+                    (center[0] + 12, center[1] - 8),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.42,
+                    (255, 255, 255),
+                    2,
+                    cv2.LINE_AA,
+                )
+                cv2.putText(
+                    display,
+                    marker.label,
+                    (center[0] + 12, center[1] - 8),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.42,
+                    color,
+                    1,
+                    cv2.LINE_AA,
+                )
 
     def _draw_overlay_text(self, display: np.ndarray) -> None:
         mode_text = self._current_mode or "none"
         crop_text = "perspective" if self._crop_setting is not None else "rect"
-        hover_z = float(self.get_parameter("hover_z_m").value)
-        raw_descend_distance = float(self.get_parameter("descend_distance_m").value)
-        descend_distance = normalize_descend_distance_m(raw_descend_distance)
-        descend_z = hover_z - descend_distance
+        hover_z_a, target_z_a = self._z_profile_for_mode("attach")
+        hover_z_d, target_z_d = self._z_profile_for_mode("detach")
         text = (
             f"mode={mode_text} | crop={crop_text} x:crop r:clear | "
-            f"a:+ d:x | z={hover_z:.3f}->{descend_z:.3f}m | q:quit"
+            f"a:+ {hover_z_a:.3f}->{target_z_a:.3f} "
+            f"d:x {hover_z_d:.3f}->{target_z_d:.3f} | "
+            f"home={DEFAULT_RETURN_HOME_POSE_M[0]:.2f},"
+            f"{DEFAULT_RETURN_HOME_POSE_M[1]:.2f},"
+            f"{DEFAULT_RETURN_HOME_POSE_M[2]:.2f} | q:quit"
         )
         cv2.rectangle(display, (0, 0), (display.shape[1], 32), (0, 0, 0), -1)
         cv2.putText(
@@ -820,7 +969,18 @@ class ClickPickPlaceNode(Node):
 
         mode = self._current_mode
         self._current_mode = None
-        marker = make_click_marker(mode, image_xy)
+        frame = self._current_frame()
+        color_shape = (
+            frame.shape
+            if frame is not None
+            else (transform.display_h, transform.display_w)
+        )
+        marker_label = self._marker_label_for_click(
+            mode=mode,
+            image_xy=image_xy,
+            color_shape=color_shape,
+        )
+        marker = make_click_marker(mode, image_xy, label=marker_label)
         self._markers.append(marker)
         self._redraw_once()
         cv2.waitKey(1)
@@ -830,6 +990,7 @@ class ClickPickPlaceNode(Node):
                 mode=mode,
                 display_xy=(u, v),
                 transform=transform,
+                color_shape=color_shape,
             )
         except Exception as exc:  # pragma: no cover - defensive UI boundary.
             self.get_logger().error(f"[blocker] unexpected click sequence error: {exc}")
@@ -881,41 +1042,53 @@ class ClickPickPlaceNode(Node):
         mode: str,
         display_xy: tuple[float, float],
         transform: DisplayTransformLike,
+        color_shape: tuple[int, ...],
     ) -> bool:
         if self._calibration is None:
             self.get_logger().error("[blocker] calibration_path 보정값을 불러오지 못했습니다")
             return False
         try:
+            image_xy = transform.display_to_image(*display_xy)
+            resolved_descend_z_m, _label, _logs = self._resolve_descend_z_for_click(
+                mode=mode,
+                image_xy=image_xy,
+                color_shape=color_shape,
+            )
+            hover_z_m, target_z_m = self._z_profile_for_mode(mode)
             plan = build_click_pick_place_plan(
                 mode=mode,
                 display_xy=display_xy,
                 transform=transform,
                 calibration=self._calibration,
-                hover_z_m=float(self.get_parameter("hover_z_m").value),
-                descend_distance_m=float(self.get_parameter("descend_distance_m").value),
+                hover_z_m=hover_z_m,
+                descend_distance_m=None,
+                target_z_m=target_z_m,
+                min_z_m=float(self.get_parameter("min_z_m").value),
                 r_deg=float(self.get_parameter("r_deg").value),
                 return_to_hover=parse_bool(self.get_parameter("return_to_hover").value),
                 movej_motion_type=int(self.get_parameter("movej_motion_type").value),
                 movel_motion_type=int(self.get_parameter("movel_motion_type").value),
+                descend_z_m_override=resolved_descend_z_m,
+                return_home_pose_m=(
+                    DEFAULT_RETURN_HOME_POSE_M if mode == "detach" else None
+                ),
             )
         except (ValueError, RuntimeError) as exc:
             self.get_logger().error(f"[blocker] click sequence build failed: {exc}")
             return False
 
         self.get_logger().info(click_log_line(plan))
-        raw_descend_distance = float(self.get_parameter("descend_distance_m").value)
-        effective_descend_distance = normalize_descend_distance_m(raw_descend_distance)
+        hover_z_m, target_z_m = self._z_profile_for_mode(mode)
         self.get_logger().info(
-            "[z] hover_z_m=%.4f descend_distance_m=%.4f "
-            "effective_descend_m=%.4f descend_z_m=%.4f"
+            "[z] mode=%s hover_z_m=%.4f target_z_m=%.4f commanded_descend_z_m=%.4f return_home=%s"
             % (
-                float(self.get_parameter("hover_z_m").value),
-                raw_descend_distance,
-                effective_descend_distance,
-                compute_descend_z_m(
-                    float(self.get_parameter("hover_z_m").value),
-                    raw_descend_distance,
-                ),
+                mode,
+                hover_z_m,
+                target_z_m,
+                plan.descend_z_m,
+                "(%.4f, %.4f, %.4f)" % DEFAULT_RETURN_HOME_POSE_M
+                if mode == "detach"
+                else "none",
             )
         )
         execution = execute_plan_steps(

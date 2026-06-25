@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>Throughline WebSocket MVP Client</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 24px; max-width: 1100px; }
+    input, button, textarea { font: inherit; margin: 4px; }
+    textarea { width: 100%; height: 220px; }
+    pre { background: #111; color: #eee; padding: 12px; overflow: auto; }
+    .row { margin-bottom: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Throughline WebSocket MVP Client</h1>
+  <div class="row">
+    <label>WS URL <input id="url" size="42" value="ws://127.0.0.1:8765/ws" /></label>
+    <button onclick="connectWs()">connect</button>
+    <button onclick="disconnectWs()">disconnect</button>
+    <span id="status">disconnected</span>
+  </div>
+  <div class="row">
+    <button onclick="sendEcho()">echo</button>
+    <button onclick="sendCommand('start')">start</button>
+    <button onclick="sendCommand('stop')">stop</button>
+    <button onclick="sendCommand('reset')">reset</button>
+    <button onclick="publishDemo()">demo state publish</button>
+  </div>
+  <h2>수신 로그</h2>
+  <textarea id="log" readonly></textarea>
+  <h2>최신 Snapshot</h2>
+  <pre id="snapshot">{}</pre>
+
+<script>
+let ws = null;
+function log(obj) {
+  const area = document.getElementById('log');
+  area.value += JSON.stringify(obj, null, 2) + "\n";
+  area.scrollTop = area.scrollHeight;
+}
+function connectWs() {
+  ws = new WebSocket(document.getElementById('url').value);
+  ws.onopen = () => document.getElementById('status').textContent = 'connected';
+  ws.onclose = () => document.getElementById('status').textContent = 'disconnected';
+  ws.onerror = (err) => log({type: 'browser_error', error: String(err)});
+  ws.onmessage = (event) => {
+    const obj = JSON.parse(event.data);
+    log(obj);
+    if (obj.snapshot) document.getElementById('snapshot').textContent = JSON.stringify(obj.snapshot, null, 2);
+  };
+}
+function disconnectWs() {
+  if (ws) ws.close();
+}
+function send(obj) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    alert('WebSocket is not connected');
+    return;
+  }
+  ws.send(JSON.stringify(obj));
+}
+function sendEcho() {
+  send({type: 'echo', source: 'browser', payload: {text: 'hello from browser'}});
+}
+function sendCommand(command) {
+  send({type: 'command', source: 'dashboard', target: 'process_manager', command, request_id: crypto.randomUUID()});
+}
+function publishDemo() {
+  send({
+    type: 'publish',
+    source: 'browser_demo',
+    topic: '/cell/process/state',
+    payload: {process_state: 10, message: 'INIT from browser demo'}
+  });
+}
+</script>
+</body>
+</html>

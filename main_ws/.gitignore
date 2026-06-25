@@ -11,6 +11,13 @@ __pycache__/
 .coverage
 htmlcov/
 
+# ROS runtime artifacts
+*.bag
+*.db3
+*.sqlite3
+*.log
+rosbag2_*/
+
 # Local editor / OS files
 .vscode/
 .idea/
@@ -19,7 +26,6 @@ htmlcov/
 .DS_Store
 
 # Runtime logs and local env files
-*.log
 .env
 .env.*
 !.env.example

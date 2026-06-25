@@ -1,0 +1,7 @@
+train: /content/yolov5/custom_data/train/images
+val: /content/yolov5/custom_data/valid/images
+test: /content/yolov5/custom_data/test/images
+nc: 2
+names:
+- hbm
+- wafer

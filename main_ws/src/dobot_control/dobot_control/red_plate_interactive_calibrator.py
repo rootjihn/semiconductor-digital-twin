@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import queue
 import sys
 import threading
@@ -146,6 +147,7 @@ class RedPlateInteractiveCalibrator(Node):
         self.declare_parameter("hsv_upper_red2", "180,255,255")
         self.declare_parameter("min_samples", 4)
         self.declare_parameter("z_hover_offset_m", 0.04)
+        self.declare_parameter("min_z_m", 0.02)
         self.declare_parameter("target_r_deg", 0.0)
         self.declare_parameter("motion_type", 2)
         self.declare_parameter("velocity_ratio", 0.3)
@@ -464,23 +466,35 @@ class RedPlateInteractiveCalibrator(Node):
             self._show_status("error", "검출 실패", [str(exc)])
             return False
         x_m, y_m = apply_pixel_to_base_xy(self._calibration, detection.center)
-        z_m = self._touch_z_m() + float(self.get_parameter("z_hover_offset_m").value)
+        raw_z_m = self._touch_z_m() + float(self.get_parameter("z_hover_offset_m").value)
+        min_z_m = float(self.get_parameter("min_z_m").value)
+        if not math.isfinite(min_z_m):
+            self._show_status("error", "테스트 실패", ["min_z_m must be finite"])
+            return False
+        z_m = max(min_z_m, raw_z_m)
         r_deg = self._target_r_deg()
         target_pose = pose_xy_to_action_target(x_m=x_m, y_m=y_m, z_m=z_m, yaw_deg=r_deg)
         self._last_target = {
             "pixel_center": detection.center,
             "target_base_m": [x_m, y_m, z_m, r_deg],
+            "raw_target_z_m": raw_z_m,
+            "min_z_m": min_z_m,
             "target_action_units": target_pose,
             "quality": detection.quality,
         }
         self._publish_result("test_target", self._last_target)
+        target_lines = [
+            "center=(%.1f, %.1f)" % (detection.center[0], detection.center[1]),
+            "target=(%.4f, %.4f, %.4f, %.2fdeg)" % (x_m, y_m, z_m, r_deg),
+        ]
+        if z_m > raw_z_m:
+            target_lines.append(
+                "z clamped: raw_z=%.4f < min_z_m=%.4f" % (raw_z_m, min_z_m)
+            )
         self._show_status(
             "test_target",
             "테스트 목표",
-            [
-                "center=(%.1f, %.1f)" % (detection.center[0], detection.center[1]),
-                "target=(%.4f, %.4f, %.4f, %.2fdeg)" % (x_m, y_m, z_m, r_deg),
-            ],
+            target_lines,
         )
         self._send_motion_goal(target_pose)
         return True

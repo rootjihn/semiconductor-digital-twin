@@ -1,0 +1,13 @@
+# Frontend dependencies/build outputs
+node_modules/
+dist/
+build/
+.cache/
+.vite/
+
+# Local env and logs
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store

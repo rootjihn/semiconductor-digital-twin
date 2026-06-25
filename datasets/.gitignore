@@ -1,0 +1,13 @@
+# Raw/derived datasets are local artifacts; keep dataset tooling/docs only.
+/floor_images/
+*.jpg
+*.jpeg
+*.png
+*.bmp
+*.npy
+*.npz
+*.bag
+*.db3
+
+# Keep this policy file tracked.
+!.gitignore

@@ -7,6 +7,7 @@ from dobot_control.click_pick_place import (
     build_perspective_display_transform,
     compute_descend_z_m,
     crop_and_resize_preview,
+    effective_descend_distance_m,
     execute_plan_steps,
     marker_kind_for_mode,
     normalize_descend_distance_m,
@@ -145,8 +146,10 @@ def test_negative_descend_distance_is_treated_as_downward_magnitude():
     assert compute_descend_z_m(0.08, -0.01) == pytest.approx(0.07)
 
 
-def test_descend_target_below_zero_is_allowed():
-    assert compute_descend_z_m(0.02, 0.03) == pytest.approx(-0.01)
+def test_descend_target_is_clamped_to_min_z():
+    assert compute_descend_z_m(0.02, 0.03) == pytest.approx(0.02)
+    assert compute_descend_z_m(0.02, 0.03, min_z_m=0.0) == pytest.approx(0.0)
+    assert effective_descend_distance_m(0.08, 0.15) == pytest.approx(0.06)
 
 
 def test_click_plan_uses_pixel_to_base_then_movej_movel_suction_return_sequence():
@@ -232,7 +235,7 @@ def test_click_plan_accepts_negative_descend_distance_as_positive_distance():
     assert plan.steps[1].target_pose[2] == pytest.approx(70.0)
 
 
-def test_click_plan_allows_descend_target_below_zero_meters():
+def test_click_plan_clamps_descend_target_to_default_min_z():
     transform = DisplayTransform(0, 0, 640, 480, 640, 480)
 
     plan = build_click_pick_place_plan(
@@ -249,7 +252,7 @@ def test_click_plan_allows_descend_target_below_zero_meters():
     )
 
     assert plan.steps[0].target_pose[2] == pytest.approx(20.0)
-    assert plan.steps[1].target_pose[2] == pytest.approx(-10.0)
+    assert plan.steps[1].target_pose[2] == pytest.approx(20.0)
 
 
 def test_dry_run_execution_does_not_call_motion_or_suction_clients():
@@ -308,3 +311,77 @@ def test_real_execution_reports_incomplete_when_motion_sender_fails():
     assert execution.failed_step_label == "MoveJ XY hover"
     assert "sequence stopped after MoveJ XY hover" in "\n".join(execution.logs)
     assert suction_calls == []
+
+
+def test_click_plan_accepts_depth_descend_z_override():
+    transform = DisplayTransform(0, 0, 640, 480, 640, 480)
+
+    plan = build_click_pick_place_plan(
+        mode="attach",
+        display_xy=(10, 20),
+        transform=transform,
+        calibration=_linear_calibration(),
+        hover_z_m=0.020,
+        descend_distance_m=0.030,
+        r_deg=0.0,
+        return_to_hover=False,
+        movej_motion_type=1,
+        movel_motion_type=2,
+        descend_z_m_override=0.015,
+    )
+
+    assert plan.descend_z_m == pytest.approx(0.02)
+    assert plan.steps[1].target_pose[2] == pytest.approx(20.0)
+
+
+def test_attach_plan_uses_absolute_mode_target_z_without_min_clamp_or_home_return():
+    transform = DisplayTransform(0, 0, 640, 480, 640, 480)
+
+    plan = build_click_pick_place_plan(
+        mode="attach",
+        display_xy=(10, 20),
+        transform=transform,
+        calibration=_linear_calibration(),
+        hover_z_m=0.080,
+        descend_distance_m=None,
+        target_z_m=-0.070,
+        r_deg=5.0,
+        return_to_hover=False,
+        movej_motion_type=1,
+        movel_motion_type=2,
+        return_home_pose_m=None,
+    )
+
+    assert [step.label for step in plan.steps] == [
+        "MoveJ XY hover",
+        "MoveL descend",
+        "suction ON",
+    ]
+    assert plan.descend_z_m == pytest.approx(-0.070)
+    assert plan.steps[0].target_pose == pytest.approx([110.0, -10.0, 80.0, 5.0])
+    assert plan.steps[1].target_pose == pytest.approx([110.0, -10.0, -70.0, 5.0])
+
+
+def test_detach_plan_uses_absolute_mode_target_z_and_returns_home():
+    transform = DisplayTransform(0, 0, 640, 480, 640, 480)
+
+    plan = build_click_pick_place_plan(
+        mode="detach",
+        display_xy=(10, 20),
+        transform=transform,
+        calibration=_linear_calibration(),
+        hover_z_m=0.090,
+        descend_distance_m=None,
+        target_z_m=-0.050,
+        r_deg=0.0,
+        return_to_hover=False,
+        movej_motion_type=1,
+        movel_motion_type=2,
+        return_home_pose_m=(0.16, 0.01, 0.06),
+    )
+
+    assert plan.steps[2].label == "suction OFF"
+    assert plan.steps[2].suction_enabled is False
+    assert plan.steps[1].target_pose[2] == pytest.approx(-50.0)
+    assert plan.steps[-1].label == "MoveJ return home"
+    assert plan.steps[-1].target_pose == pytest.approx([160.0, 10.0, 60.0, 0.0])

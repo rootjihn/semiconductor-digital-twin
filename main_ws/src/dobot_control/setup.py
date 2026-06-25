@@ -31,6 +31,9 @@ setup(
             'image_crop_viewer = dobot_control.image_crop_viewer:main',
             'click_pick_place = dobot_control.click_pick_place:main',
             'red_plate_command = dobot_control.red_plate_command:main',
+            'dobot_adapter = dobot_control.dobot_adapter_node:main',
+            'detected_object_ptp_move = dobot_control.detected_object_ptp_move:main',
+            "param_ptp_pick_place = dobot_control.param_ptp_pick_place:main",
             'red_plate_interactive_calibrator = '
             'dobot_control.red_plate_interactive_calibrator:main',
         ],

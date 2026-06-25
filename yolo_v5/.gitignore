@@ -1,0 +1,23 @@
+# Model weights and exported models
+**/weights/
+**/*.pt
+**/*.onnx
+**/*.engine
+**/*.tflite
+
+# Training/evaluation outputs
+**/train/
+**/test/
+**/validation/
+**/runs/
+**/wandb/
+**/*.log
+
+# Python/cache artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Keep experiment config files tracked.
+!**/config/
+!**/config/*.yaml
