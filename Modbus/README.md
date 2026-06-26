@@ -208,13 +208,22 @@ process_manager_node
 | 60 | PICK_DONE |
 | 70 | CONVEYOR_MOVING |
 | 80 | CONVEYOR_STOPPED_AT_ZONE |
-| 90 | PACKAGING_SIM_RUNNING |
-| 100 | POST_PACKAGING_RECOGNITION |
-| 110 | RE_PICK_READY |
-| 120 | DOBOT_RE_PICKING |
-| 130 | LOAD_TO_TURTLEBOT_READY |
-| 140 | TURTLEBOT_LOADING |
-| 150 | TURTLEBOT_DISPATCHED |
+| 90 | PACKAGING_SIM_RUNNING(legacy) |
+| 100 | POST_PACKAGING_RECOGNITION(legacy) |
+| 110 | RE_PICK_READY(legacy) |
+| 120 | DOBOT_RE_PICKING(legacy) |
+| 130 | LOAD_TO_TURTLEBOT_READY(legacy) |
+| 140 | TURTLEBOT_LOADING(legacy) |
+| 150 | TURTLEBOT_DISPATCHED(legacy) |
+| 200 | ROBODK_WAFER_CREATE |
+| 210 | ROBODK_WAFER_MOVE_TO_PROCESS_CONVEYOR |
+| 220 | ROBODK_WAFER_TO_DIE_CONVERSION |
+| 230 | ROBODK_DIE_TRAY |
+| 240 | ROBODK_BONDING_PROCESS |
+| 250 | ROBODK_AGV_LOADING_STEP_1 |
+| 260 | ROBODK_AGV_LOADING_STEP_2 |
+| 270 | ROBODK_AGV_LOADING_STEP_3 |
+| 280 | ROBODK_AGV_TRANSFER |
 | 900 | COMPLETE |
 | 999 | ERROR |
 
@@ -237,14 +246,22 @@ process_manager_node
 
 | 값 | 의미 |
 |---|---|
-| 0 | offline |
-| 1 | ready |
-| 2 | station_loaded |
-| 3 | sim_running |
-| 4 | sim_paused |
-| 5 | sim_done |
-| 6 | waiting_trigger |
-| 9 | fault |
+| 0 | OFFLINE |
+| 1 | READY |
+| 2 | STATION_LOADED |
+| 10 | WAFER_CREATE |
+| 20 | WAFER_MOVE_TO_PROCESS_CONVEYOR |
+| 30 | WAFER_TO_DIE_CONVERSION |
+| 40 | DIE_TRAY |
+| 50 | BONDING_PROCESS |
+| 61 | AGV_LOADING_STEP_1 |
+| 62 | AGV_LOADING_STEP_2 |
+| 63 | AGV_LOADING_STEP_3 |
+| 70 | AGV_TRANSFER |
+| 90 | SCENARIO_DONE |
+| 99 | FAULT |
+
+기존 rough 상태값 `3=SIM_RUNNING`, `4=SIM_PAUSED`, `5=SIM_DONE`, `6=WAITING_TRIGGER`, `9=FAULT`는 구형/호환 표시용으로만 취급하고, 신규 demo flow는 위 영상 단계값을 쓴다.
 
 ### 6-4. 장치 상태 예시
 
@@ -374,14 +391,16 @@ flowchart TD
     F --> G[PICK_DONE]
     G --> H[CONVEYOR_MOVING]
     H --> I[CONVEYOR_STOPPED_AT_ZONE]
-    I --> J[PACKAGING_SIM_RUNNING]
-    J --> K[POST_PACKAGING_RECOGNITION]
-    K --> L[RE_PICK_READY]
-    L --> M[DOBOT_RE_PICKING]
-    M --> N[LOAD_TO_TURTLEBOT_READY]
-    N --> O[TURTLEBOT_LOADING]
-    O --> P[TURTLEBOT_DISPATCHED]
-    P --> Q[COMPLETE]
+    I --> J[ROBODK_WAFER_CREATE]
+    J --> K[ROBODK_WAFER_MOVE_TO_PROCESS_CONVEYOR]
+    K --> L[ROBODK_WAFER_TO_DIE_CONVERSION]
+    L --> M[ROBODK_DIE_TRAY]
+    M --> N[ROBODK_BONDING_PROCESS]
+    N --> O[ROBODK_AGV_LOADING_STEP_1]
+    O --> P[ROBODK_AGV_LOADING_STEP_2]
+    P --> Q[ROBODK_AGV_LOADING_STEP_3]
+    Q --> R[ROBODK_AGV_TRANSFER]
+    R --> S[COMPLETE]
 
     B --> Z[ERROR]
     C --> Z
@@ -397,6 +416,9 @@ flowchart TD
     M --> Z
     N --> Z
     O --> Z
+    P --> Z
+    Q --> Z
+    R --> Z
 ```
 
 ### 8-2. 컨베이어 시작 흐름
@@ -433,12 +455,12 @@ sequenceDiagram
     RK-->>WA: sim_running
     WA-->>RB: 상태 응답
     RB-->>PM: /robodk/state = sim_running
-    PM->>MB: HR114 = 3 mirror
+    PM->>MB: HR114 = 10 mirror (WAFER_CREATE)
     RK-->>WA: sim_done
     WA-->>RB: 상태 응답
     RB-->>PM: /robodk/state = sim_done
-    PM->>MB: HR114 = 5 mirror
-    PM->>PM: process_state=POST_PACKAGING_RECOGNITION 전이
+    PM->>MB: HR114 = 90 mirror (SCENARIO_DONE)
+    PM->>PM: process_state=ROBODK_AGV_TRANSFER 전이
 ```
 
 ---

@@ -1,0 +1,7 @@
+# Local robot/simulation recordings and sensor dumps
+# These files are usually large binary artifacts. Keep them local by default;
+# publish with Git LFS, GitHub Release assets, or external storage when needed.
+*
+!.gitignore
+!README.md
+!MANIFEST.md

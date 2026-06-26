@@ -62,13 +62,24 @@ class ProcessState:
     PICK_DONE = 60
     CONVEYOR_MOVING = 70
     CONVEYOR_STOPPED_AT_ZONE = 80
-    PACKAGING_SIM_RUNNING = 90
-    POST_PACKAGING_RECOGNITION = 100
-    RE_PICK_READY = 110
-    DOBOT_RE_PICKING = 120
-    LOAD_TO_TURTLEBOT_READY = 130
-    TURTLEBOT_LOADING = 140
-    TURTLEBOT_DISPATCHED = 150
+    ROBODK_WAFER_CREATE = 200
+    ROBODK_WAFER_MOVE_TO_PROCESS_CONVEYOR = 210
+    ROBODK_WAFER_TO_DIE_CONVERSION = 220
+    ROBODK_DIE_TRAY = 230
+    ROBODK_BONDING_PROCESS = 240
+    ROBODK_AGV_LOADING_STEP_1 = 250
+    ROBODK_AGV_LOADING_STEP_2 = 260
+    ROBODK_AGV_LOADING_STEP_3 = 270
+    ROBODK_AGV_TRANSFER = 280
+
+    # backward-compat (legacy demo naming)
+    PACKAGING_SIM_RUNNING = ROBODK_WAFER_CREATE
+    POST_PACKAGING_RECOGNITION = ROBODK_WAFER_MOVE_TO_PROCESS_CONVEYOR
+    RE_PICK_READY = ROBODK_WAFER_TO_DIE_CONVERSION
+    DOBOT_RE_PICKING = ROBODK_DIE_TRAY
+    LOAD_TO_TURTLEBOT_READY = ROBODK_BONDING_PROCESS
+    TURTLEBOT_LOADING = ROBODK_AGV_LOADING_STEP_1
+    TURTLEBOT_DISPATCHED = ROBODK_AGV_LOADING_STEP_2
     COMPLETE = 900
     ERROR = 999
 
@@ -93,6 +104,27 @@ class MockServerConfig:
     demo_mode: bool = True
     heartbeat_interval_sec: float = 1.0
     demo_step_interval_sec: float = 3.0
+
+
+class RobodkState:
+    OFFLINE = 0
+    READY = 1
+    STATION_LOADED = 2
+    WAFER_CREATE = 10
+    WAFER_MOVE_TO_PROCESS_CONVEYOR = 20
+    WAFER_TO_DIE_CONVERSION = 30
+    DIE_TRAY = 40
+    BONDING_PROCESS = 50
+    AGV_LOADING_STEP_1 = 61
+    AGV_LOADING_STEP_2 = 62
+    AGV_LOADING_STEP_3 = 63
+    AGV_TRANSFER = 70
+    SCENARIO_DONE = 90
+    FAULT = 99
+
+    # legacy mirror labels (기존 값 대비 하위호환 표시용)
+    SIM_RUNNING = WAFER_CREATE
+    SIM_DONE = SCENARIO_DONE
 
 
 class MockCellStore:
@@ -155,6 +187,7 @@ class DemoSimulator:
         self._heartbeat_thread: Optional[threading.Thread] = None
         self._command_thread: Optional[threading.Thread] = None
         self._demo_thread: Optional[threading.Thread] = None
+        self._robodk_cmd_seq = 0
 
     def start(self) -> None:
         self.seed_initial_state()
@@ -279,6 +312,13 @@ class DemoSimulator:
         self.store.write_hr(RegisterMap.HR_LAST_ACK_SEQ, (current + 1) % 65535)
 
     def _handle_start(self) -> None:
+        self.store.write_hr(RegisterMap.HR_TARGET_COUNT_TOTAL, 0)
+        self.store.write_hr(RegisterMap.HR_TARGET_COUNT_DONE, 0)
+        self.store.write_hr(RegisterMap.HR_TARGET_COUNT_NG, 0)
+        self.store.write_hr(RegisterMap.HR_ROBODK_STATE, RobodkState.READY)
+        self.store.write_hr(RegisterMap.HR_ROBODK_LAST_CMD, 0)
+        self.store.write_hr(RegisterMap.HR_ROBODK_ERROR_CODE, 0)
+        self.store.write_ir(RegisterMap.IR_CYCLE_TIME_MS, 0)
         self.store.write_hr(RegisterMap.HR_PROCESS_STATE, ProcessState.INIT)
         self.store.write_hr(RegisterMap.HR_PROCESS_SUBSTATE, 0)
         self.store.write_hr(RegisterMap.HR_OPERATION_MODE, 1)  # auto
@@ -291,7 +331,12 @@ class DemoSimulator:
         self.store.write_hr(RegisterMap.HR_CONVEYOR_STATE, DeviceState.READY)
         self.store.write_hr(RegisterMap.HR_CONVEYOR_SPEED_ACTUAL, 0)
         self.store.write_hr(RegisterMap.HR_DOBOT_STATE, DeviceState.READY)
-        self.store.write_hr(RegisterMap.HR_ROBODK_STATE, DeviceState.READY)
+        self.store.write_hr(RegisterMap.HR_ROBODK_STATE, RobodkState.READY)
+        self.store.write_hr(RegisterMap.HR_ROBODK_LAST_CMD, 0)
+        self.store.write_hr(RegisterMap.HR_ROBODK_LAST_ACK_SEQ, 0)
+        self.store.write_hr(RegisterMap.HR_ROBODK_ERROR_CODE, 0)
+        self.store.write_hr(RegisterMap.HR_TARGET_COUNT_DONE, 0)
+        self.store.write_hr(RegisterMap.HR_TARGET_COUNT_NG, 0)
 
     def _handle_pause(self) -> None:
         self.store.write_hr(RegisterMap.HR_PROCESS_SUBSTATE, 1)
@@ -303,6 +348,10 @@ class DemoSimulator:
         self.store.write_hr(RegisterMap.HR_WARN_CODE, 0)
         self.store.write_ir(RegisterMap.IR_ALARM_ACTIVE_CODE, 0)
         self.store.write_hr(RegisterMap.HR_PROCESS_STATE, ProcessState.IDLE)
+        self.store.write_hr(RegisterMap.HR_ROBODK_STATE, RobodkState.READY)
+        self.store.write_hr(RegisterMap.HR_ROBODK_LAST_CMD, 0)
+        self.store.write_hr(RegisterMap.HR_ROBODK_LAST_ACK_SEQ, 0)
+        self.store.write_hr(RegisterMap.HR_ROBODK_ERROR_CODE, 0)
         self.store.write_hr(RegisterMap.HR_CONVEYOR_STATE, DeviceState.READY)
         self.store.write_hr(RegisterMap.HR_CONVEYOR_SPEED_ACTUAL, 0)
 
@@ -337,13 +386,15 @@ class DemoSimulator:
             ProcessState.PICK_DONE,
             ProcessState.CONVEYOR_MOVING,
             ProcessState.CONVEYOR_STOPPED_AT_ZONE,
-            ProcessState.PACKAGING_SIM_RUNNING,
-            ProcessState.POST_PACKAGING_RECOGNITION,
-            ProcessState.RE_PICK_READY,
-            ProcessState.DOBOT_RE_PICKING,
-            ProcessState.LOAD_TO_TURTLEBOT_READY,
-            ProcessState.TURTLEBOT_LOADING,
-            ProcessState.TURTLEBOT_DISPATCHED,
+            ProcessState.ROBODK_WAFER_CREATE,
+            ProcessState.ROBODK_WAFER_MOVE_TO_PROCESS_CONVEYOR,
+            ProcessState.ROBODK_WAFER_TO_DIE_CONVERSION,
+            ProcessState.ROBODK_DIE_TRAY,
+            ProcessState.ROBODK_BONDING_PROCESS,
+            ProcessState.ROBODK_AGV_LOADING_STEP_1,
+            ProcessState.ROBODK_AGV_LOADING_STEP_2,
+            ProcessState.ROBODK_AGV_LOADING_STEP_3,
+            ProcessState.ROBODK_AGV_TRANSFER,
             ProcessState.COMPLETE,
         ]
 
@@ -358,26 +409,111 @@ class DemoSimulator:
         self.store.write_hr(RegisterMap.HR_PROCESS_STATE, state)
 
         # 최소 데모용 mirror 상태
-        if state == ProcessState.CONVEYOR_MOVING:
+        if state in {
+            ProcessState.ROBODK_WAFER_CREATE,
+            ProcessState.ROBODK_WAFER_MOVE_TO_PROCESS_CONVEYOR,
+            ProcessState.ROBODK_WAFER_TO_DIE_CONVERSION,
+            ProcessState.ROBODK_DIE_TRAY,
+            ProcessState.ROBODK_BONDING_PROCESS,
+            ProcessState.ROBODK_AGV_LOADING_STEP_1,
+            ProcessState.ROBODK_AGV_LOADING_STEP_2,
+            ProcessState.ROBODK_AGV_LOADING_STEP_3,
+            ProcessState.ROBODK_AGV_TRANSFER,
+        }:
+            self._apply_robo_demo_state(state)
+        elif state == ProcessState.CONVEYOR_MOVING:
             self.store.write_hr(RegisterMap.HR_CONVEYOR_STATE, DeviceState.MOVING)
             self.store.write_hr(RegisterMap.HR_CONVEYOR_SPEED_ACTUAL, 100)
+            self.store.write_di(RegisterMap.DI_SENSOR_PICK_ZONE, 1)
+            self.store.write_di(RegisterMap.DI_SENSOR_PACKAGING_ZONE, 0)
+            self.store.write_di(RegisterMap.DI_SENSOR_OUTFEED, 0)
+            self.store.write_hr(RegisterMap.HR_ROBODK_STATE, RobodkState.READY)
+            self.store.write_hr(RegisterMap.HR_ROBODK_LAST_CMD, 0)
+            self.store.write_hr(RegisterMap.HR_ROBODK_LAST_ACK_SEQ, 0)
         elif state == ProcessState.CONVEYOR_STOPPED_AT_ZONE:
             self.store.write_hr(RegisterMap.HR_CONVEYOR_STATE, DeviceState.READY)
             self.store.write_hr(RegisterMap.HR_CONVEYOR_SPEED_ACTUAL, 0)
             self.store.write_di(RegisterMap.DI_SENSOR_PACKAGING_ZONE, 1)
-        elif state == ProcessState.PACKAGING_SIM_RUNNING:
-            self.store.write_hr(RegisterMap.HR_ROBODK_STATE, 3)
-        elif state == ProcessState.POST_PACKAGING_RECOGNITION:
-            self.store.write_hr(RegisterMap.HR_ROBODK_STATE, 5)
-            self.store.write_di(RegisterMap.DI_SENSOR_PACKAGING_ZONE, 0)
+            self.store.write_di(RegisterMap.DI_SENSOR_PICK_ZONE, 0)
+            self.store.write_hr(RegisterMap.HR_ROBODK_STATE, RobodkState.READY)
+            self.store.write_hr(RegisterMap.HR_ROBODK_LAST_CMD, 0)
+            self.store.write_hr(RegisterMap.HR_ROBODK_LAST_ACK_SEQ, 0)
         elif state == ProcessState.COMPLETE:
             done = self.store.read_hr(RegisterMap.HR_TARGET_COUNT_DONE)
             self.store.write_hr(RegisterMap.HR_TARGET_COUNT_DONE, done + 1)
+            done_count = done + 1
+            total = self.store.read_hr(RegisterMap.HR_TARGET_COUNT_TOTAL)
+            self.store.write_hr(RegisterMap.HR_TARGET_COUNT_TOTAL, max(total, done_count))
+            self.store.write_hr(RegisterMap.HR_ROBODK_STATE, RobodkState.SCENARIO_DONE)
+            self.store.write_di(RegisterMap.DI_SENSOR_OUTFEED, 1)
+            self.store.write_di(RegisterMap.DI_SENSOR_PACKAGING_ZONE, 0)
+            self._set_robodk_command_feedback(ProcessState.ROBODK_AGV_TRANSFER)
+            self.store.write_ir(RegisterMap.IR_CYCLE_TIME_MS, min(65535, done_count * 10))
         elif state == ProcessState.IDLE:
             self.store.write_hr(RegisterMap.HR_CONVEYOR_SPEED_ACTUAL, 0)
-            self.store.write_hr(RegisterMap.HR_ROBODK_STATE, DeviceState.READY)
+            self.store.write_hr(RegisterMap.HR_ROBODK_STATE, RobodkState.READY)
+            self.store.write_di(RegisterMap.DI_SENSOR_PACKAGING_ZONE, 0)
+            self.store.write_di(RegisterMap.DI_SENSOR_OUTFEED, 0)
+            self._set_robodk_command_feedback(ProcessState.IDLE)
 
         LOGGER.info("demo state 적용: %s", state)
+
+    def _apply_robo_demo_state(self, state: int) -> None:
+        stage_state = self._robodk_state_for_process_state(state)
+        self.store.write_hr(RegisterMap.HR_ROBODK_STATE, stage_state)
+        self.store.write_hr(RegisterMap.HR_ROBODK_ERROR_CODE, 0)
+        self.store.write_di(RegisterMap.DI_SENSOR_PACKAGING_ZONE, 1)
+        self.store.write_di(RegisterMap.DI_SENSOR_OUTFEED, 0)
+        self.store.write_hr(RegisterMap.HR_CONVEYOR_STATE, DeviceState.READY)
+        self.store.write_hr(RegisterMap.HR_CONVEYOR_SPEED_ACTUAL, 0)
+        self._set_robodk_command_feedback(state)
+
+        cycle_time = {
+            ProcessState.ROBODK_WAFER_CREATE: 350,
+            ProcessState.ROBODK_WAFER_MOVE_TO_PROCESS_CONVEYOR: 450,
+            ProcessState.ROBODK_WAFER_TO_DIE_CONVERSION: 750,
+            ProcessState.ROBODK_DIE_TRAY: 120,
+            ProcessState.ROBODK_BONDING_PROCESS: 900,
+            ProcessState.ROBODK_AGV_LOADING_STEP_1: 240,
+            ProcessState.ROBODK_AGV_LOADING_STEP_2: 240,
+            ProcessState.ROBODK_AGV_LOADING_STEP_3: 240,
+            ProcessState.ROBODK_AGV_TRANSFER: 300,
+        }.get(state, 0)
+        self.store.write_ir(RegisterMap.IR_CYCLE_TIME_MS, cycle_time)
+
+        if state == ProcessState.ROBODK_AGV_TRANSFER:
+            self.store.write_di(RegisterMap.DI_SENSOR_OUTFEED, 1)
+
+    def _robodk_state_for_process_state(self, state: int) -> int:
+        return {
+            ProcessState.ROBODK_WAFER_CREATE: RobodkState.WAFER_CREATE,
+            ProcessState.ROBODK_WAFER_MOVE_TO_PROCESS_CONVEYOR: RobodkState.WAFER_MOVE_TO_PROCESS_CONVEYOR,
+            ProcessState.ROBODK_WAFER_TO_DIE_CONVERSION: RobodkState.WAFER_TO_DIE_CONVERSION,
+            ProcessState.ROBODK_DIE_TRAY: RobodkState.DIE_TRAY,
+            ProcessState.ROBODK_BONDING_PROCESS: RobodkState.BONDING_PROCESS,
+            ProcessState.ROBODK_AGV_LOADING_STEP_1: RobodkState.AGV_LOADING_STEP_1,
+            ProcessState.ROBODK_AGV_LOADING_STEP_2: RobodkState.AGV_LOADING_STEP_2,
+            ProcessState.ROBODK_AGV_LOADING_STEP_3: RobodkState.AGV_LOADING_STEP_3,
+            ProcessState.ROBODK_AGV_TRANSFER: RobodkState.AGV_TRANSFER,
+        }.get(state, RobodkState.READY)
+
+    def _set_robodk_command_feedback(self, state: int) -> None:
+        self._robodk_cmd_seq = (self._robodk_cmd_seq + 1) % 65535
+        last_cmd = {
+            ProcessState.ROBODK_WAFER_CREATE: RobodkState.WAFER_CREATE,
+            ProcessState.ROBODK_WAFER_MOVE_TO_PROCESS_CONVEYOR: RobodkState.WAFER_MOVE_TO_PROCESS_CONVEYOR,
+            ProcessState.ROBODK_WAFER_TO_DIE_CONVERSION: RobodkState.WAFER_TO_DIE_CONVERSION,
+            ProcessState.ROBODK_DIE_TRAY: RobodkState.DIE_TRAY,
+            ProcessState.ROBODK_BONDING_PROCESS: RobodkState.BONDING_PROCESS,
+            ProcessState.ROBODK_AGV_LOADING_STEP_1: RobodkState.AGV_LOADING_STEP_1,
+            ProcessState.ROBODK_AGV_LOADING_STEP_2: RobodkState.AGV_LOADING_STEP_2,
+            ProcessState.ROBODK_AGV_LOADING_STEP_3: RobodkState.AGV_LOADING_STEP_3,
+            ProcessState.ROBODK_AGV_TRANSFER: RobodkState.AGV_TRANSFER,
+            ProcessState.COMPLETE: RobodkState.SCENARIO_DONE,
+            ProcessState.IDLE: RobodkState.READY,
+        }.get(state, RobodkState.READY)
+        self.store.write_hr(RegisterMap.HR_ROBODK_LAST_CMD, last_cmd)
+        self.store.write_hr(RegisterMap.HR_ROBODK_LAST_ACK_SEQ, self._robodk_cmd_seq)
 
 
 def build_context(unit_id: int):

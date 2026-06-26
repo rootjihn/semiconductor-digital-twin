@@ -382,6 +382,25 @@ HR116 robodk_last_ack_seq
 HR117 robodk_error_code
 ```
 
+권장 mirror 값 (register 정합성 기준):
+
+| 값 | robodk_state |
+|---|---|
+| 0 | OFFLINE |
+| 1 | READY |
+| 2 | STATION_LOADED |
+| 10 | WAFER_CREATE |
+| 20 | WAFER_MOVE_TO_PROCESS_CONVEYOR |
+| 30 | WAFER_TO_DIE_CONVERSION |
+| 40 | DIE_TRAY |
+| 50 | BONDING_PROCESS |
+| 61 | AGV_LOADING_STEP_1 |
+| 62 | AGV_LOADING_STEP_2 |
+| 63 | AGV_LOADING_STEP_3 |
+| 70 | AGV_TRANSFER |
+| 90 | SCENARIO_DONE |
+| 99 | FAULT |
+
 실제 RoboDK 명령은 별도 경로를 쓴다.
 
 ```text

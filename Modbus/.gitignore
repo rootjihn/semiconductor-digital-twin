@@ -12,5 +12,36 @@ venv/
 .env.*
 !.env.example
 *.log
+*.sqlite
 *.sqlite3
+*.db
+*.db3
 runtime/
+
+# ROS2 / colcon generated output
+build/
+install/
+log/
+
+# Robot/runtime captures that should not be committed directly
+*.bag
+*.bag/
+*.pcd
+*.ply
+*.mp4
+*.avi
+*.mov
+
+# Secret/key/credential material
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+credentials.json
+*credentials*.json
+*secret*.json
+*token*.json

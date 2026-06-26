@@ -1,0 +1,6 @@
+# Local backup snapshots
+# Backups are machine-local recovery artifacts and can contain stale secrets,
+# virtual environments, caches, or duplicated source. Do not commit them by default.
+*
+!.gitignore
+!README.md
