@@ -24,7 +24,7 @@ Dobot Magician, TurtleBot3 Waffle Pi, Raspberry Pi 기반 컨베이어, Intel Re
 
 ---
 
-## 시스템 구성
+## 목표 시스템 구성
 
 ```mermaid
 flowchart LR
@@ -33,19 +33,23 @@ flowchart LR
     AGV["TurtleBot3 Waffle Pi<br/>물류 이송"] <--> PM
     PM <--> MB["Modbus Bridge"]
     MB <--> CONV["Raspberry Pi<br/>Conveyor"]
-    PM <--> WS["WebSocket Gateway"]
-    WS <--> WEB["Vue Dashboard"]
-    PM <--> RDK["RoboDK<br/>Digital Twin"]
+    PM <-.-> WS["WebSocket Gateway"]
+    WS <-.-> WEB["Vue Dashboard"]
+    PM <-.-> RDK["RoboDK<br/>Digital Twin"]
 ```
+
+- **실선:** 구현 및 동작 검증을 진행한 장비/통신 흐름
+- **점선:** 테스트 환경을 활용했거나 단계적으로 연계할 목표 흐름
 
 ### 공정 흐름
 
 1. 카메라 영상에서 웨이퍼를 인식합니다.
 2. Dobot Magician이 웨이퍼를 Pick & Place 합니다.
-3. 컨베이어가 웨이퍼와 가공물을 다음 공정으로 이송합니다.
-4. 공정 상태와 장비 상태를 ROS2 및 Modbus로 전달합니다.
-5. RoboDK에서 웨이퍼, DIE, 트레이 적재 및 로봇 공정을 시뮬레이션합니다.
-6. WebSocket을 통해 웹 대시보드에 상태와 이벤트를 표시합니다.
+3. Waffle Pi가 공정 간 물류 이송을 수행합니다.
+4. 컨베이어가 웨이퍼와 가공물을 다음 공정으로 이송합니다.
+5. 공정 상태와 장비 상태를 ROS2 및 Modbus로 전달합니다.
+6. RoboDK에서 웨이퍼, DIE, 트레이 적재 및 로봇 공정을 시뮬레이션합니다.
+7. WebSocket 기반 관제 페이지에 상태와 이벤트를 표시하는 연계 구조를 구성합니다.
 
 ---
 
